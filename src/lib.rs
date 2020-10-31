@@ -1,12 +1,20 @@
 #![deny(clippy::all)]
 // #![deny(clippy::pedantic)]
-#![allow(clippy::approx_constant)]
 
 use std::convert::TryFrom;
 use std::num::FpCategory;
-use std::ops::Neg;
+use std::ops::{Mul, Neg};
 
 #[derive(Debug, PartialEq)]
+/// container for special values used in `BigInt`
+///
+/// ```rust
+/// use big_int::{BigInt, Special};
+///
+/// assert_eq!("Infinity", BigInt::from(Special::Inf).to_string());
+/// assert_eq!("NaN", BigInt::from(Special::Nan).to_string());
+/// assert_eq!("0", BigInt::from(Special::Zero).to_string());
+/// ```
 pub enum Special {
     Inf,
     Nan,
@@ -31,12 +39,26 @@ impl Neg for Sign {
 }
 
 #[derive(Debug, PartialEq)]
+/// Struct to store large numbers
+///
+/// ```rust
+/// use big_int::BigInt;
+///
+/// let number = "1.25*10^15".parse::<BigInt>();
+/// let the_same_number = BigInt::from_parts(1.25, 15);
+/// let also_the_same_number: BigInt = 1250_000_000_000_000.0.into();
+///  
+/// assert_eq!(the_same_number, also_the_same_number);
+/// assert_eq!(number, Ok(the_same_number));
+/// assert_eq!(number, Ok(also_the_same_number));
+/// ```
 pub struct BigInt {
-    /// coefficient: 9.9999999999 -> 1.0
+    // coefficient: 9.9999999999 -> 1.0
     coefficient: u64,
     sign: Sign,
     exponent: i32,
     special: Option<Special>,
+    exponent_style: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -62,41 +84,65 @@ impl std::error::Error for ParseError {}
 
 const U64_STEP: f64 = 4.878_909_776_184_77e-19;
 const U64_MAX: u64 = std::u64::MAX;
+const DEFAULT_EXPONENT_STYLE: &str = "*10^";
 
 impl BigInt {
-    pub fn zero() -> Self {
+    /// Creates a BigInt with the value 0
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!("0", BigInt::zero().to_string())
+    /// ```
+    pub fn zero() -> BigInt {
         BigInt {
-            coefficient: 0,
-            sign: Sign::Pos,
-            exponent: 0,
             special: Some(Special::Zero),
+            ..Default::default()
         }
     }
 
-    pub fn one() -> Self {
+    /// Creates a BigInt with the value 1
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!("1", BigInt::one().to_string())
+    /// ```
+    pub fn one() -> BigInt {
         BigInt {
             coefficient: 0,
             sign: Sign::Pos,
             exponent: 0,
             special: None,
+            exponent_style: None,
         }
     }
 
-    pub fn infinity() -> Self {
+    /// Creates a BigInt containing `f64::INFINITY`
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!("Infinity", BigInt::infinity().to_string())
+    /// ```
+    pub fn infinity() -> BigInt {
         BigInt {
-            coefficient: 0,
-            sign: Sign::Pos,
-            exponent: 0,
             special: Some(Special::Inf),
+            ..Default::default()
         }
     }
 
-    pub fn nan() -> Self {
+    /// Creates a BigInt containing `f64::NAN`
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!("NaN", BigInt::nan().to_string())
+    /// ```
+    pub fn nan() -> BigInt {
         BigInt {
-            coefficient: 0,
-            sign: Sign::Pos,
-            exponent: 0,
             special: Some(Special::Nan),
+            ..Default::default()
         }
     }
 
@@ -108,34 +154,38 @@ impl BigInt {
         (input as f64 * U64_STEP) + 1.0
     }
 
-    pub fn from_float(input: f64) -> Self {
+    /// Creates BigInt from a float and exponent part
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!("3.14*10^20", BigInt::from_parts(3.14, 20).to_string())
+    /// ```
+    pub fn from_parts(coefficient: f64, exponent: i32) -> BigInt {
+        let mut big_int = BigInt::from_float(coefficient);
+        big_int.exponent += exponent;
+
+        big_int
+    }
+
+    /// Creates BigInt from a float
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!("3.14", BigInt::from_float(3.14).to_string())
+    /// ```
+    pub fn from_float(input: f64) -> BigInt {
         match input.classify() {
             FpCategory::Infinite => {
-                let sign = if input.is_sign_positive() {
-                    Sign::Pos
+                if input.is_sign_positive() {
+                    return Self::infinity();
                 } else {
-                    Sign::Neg
-                };
-
-                return BigInt {
-                    coefficient: 0,
-                    sign,
-                    exponent: 0,
-                    special: Some(Special::Inf),
+                    return -Self::infinity();
                 };
             }
-
-            FpCategory::Nan => {
-                return BigInt {
-                    coefficient: 0,
-                    sign: Sign::Pos,
-                    exponent: 0,
-                    special: Some(Special::Nan),
-                }
-            }
-
-            FpCategory::Zero => return BigInt::zero(),
-
+            FpCategory::Nan => return Self::nan(),
+            FpCategory::Zero => return Self::zero(),
             _ => (),
         };
 
@@ -143,9 +193,7 @@ impl BigInt {
             let coefficient = Self::convert(input);
             return BigInt {
                 coefficient,
-                sign: Sign::Pos,
-                exponent: 0,
-                special: None,
+                ..Default::default()
             };
         }
 
@@ -155,8 +203,7 @@ impl BigInt {
             return BigInt {
                 coefficient,
                 sign: Sign::Neg,
-                exponent: 0,
-                special: None,
+                ..Default::default()
             };
         }
 
@@ -174,23 +221,31 @@ impl BigInt {
                 coefficient,
                 sign,
                 exponent,
-                special: None,
+                ..Default::default()
             };
         }
 
         if input.abs() < 1.0 {
             let exponent = input.abs().log10().floor() as i32;
             let remainder = input / (10_f64.powi(exponent));
-            let mut big_int = Self::from_float(remainder);
 
-            big_int.exponent = exponent;
-
-            return big_int;
+            return Self::from_parts(remainder, exponent);
         }
 
         unreachable!()
     }
 
+    /// Casts `BigInt` to float.
+    ///
+    /// Large numbers that don't fit into f64 will turn into `f64::INFINITY`.
+    /// Small numbers that don't fit into f64 will turn into 0.0.
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!(2.43, BigInt::from_parts(24.3, -1).to_float());
+    /// assert_eq!(f64::INFINITY, BigInt::from_parts(4.3, 984512542).to_float());
+    /// ```
     pub fn to_float(&self) -> f64 {
         match self {
             BigInt {
@@ -219,17 +274,113 @@ impl BigInt {
 
         nmbr * power
     }
+
+    /// extracts `BigInt` to parts.
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// assert_eq!((2.43, 0), BigInt::from_parts(24.3, -1).to_parts());
+    ///
+    /// let big_int = BigInt::parse("4.3*10^984512542").expect("invalid format");
+    /// assert_eq!((4.3, 984512542), big_int.to_parts());
+    /// ```
+    pub fn to_parts(&self) -> (f64, i32) {
+        match self {
+            BigInt {
+                special: Some(Special::Inf),
+                sign: Sign::Pos,
+                ..
+            } => (f64::INFINITY, 0),
+            BigInt {
+                special: Some(Special::Inf),
+                sign: Sign::Neg,
+                ..
+            } => (-f64::INFINITY, 0),
+            BigInt {
+                special: Some(Special::Nan),
+                ..
+            } => (f64::NAN, 0),
+            BigInt {
+                special: Some(Special::Zero),
+                ..
+            } => (0.0, 0),
+            BigInt {
+                coefficient,
+                exponent,
+                ..
+            } => (Self::convert_back(*coefficient), *exponent),
+        }
+    }
+
+    /// parses a `String` to a `BigInt`
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// let big_int = BigInt::parse("2.6*10^4").expect("invalid format");
+    /// assert_eq!(26000.0, big_int.to_float());
+    ///
+    /// // can also be just a float.
+    /// let big_int = BigInt::parse("15.51").expect("invalid format");
+    /// assert_eq!(15.51, big_int.to_float());
+    /// ```
+    pub fn parse(input: &str) -> Result<BigInt, ParseError> {
+        if let Ok(x) = input.parse::<f64>() {
+            return Ok(Self::from_float(x));
+        };
+
+        let parts: Vec<_> = input.split(DEFAULT_EXPONENT_STYLE).collect();
+        if parts.len() != 2 {
+            return Err(ParseError::InvalidFormat);
+        }
+
+        let first = match parts[0].parse::<f64>() {
+            Ok(x) => x,
+            Err(_) => return Err(ParseError::InvalidPart),
+        };
+
+        let second = match parts[1].parse::<i32>() {
+            Ok(x) => x,
+            Err(_) => return Err(ParseError::NotExponent),
+        };
+
+        let big_int = Self::from_parts(first, second);
+
+        Ok(big_int)
+    }
+
+    // operations
+
+    /// The same as the `mul` function only can take a `Into<BigInt>` as its argument
+    pub fn multiply<RHS: Into<BigInt>>(self, rhs: RHS) -> BigInt {
+        let other: BigInt = rhs.into();
+        self * other
+    }
+
+    /// Calculates the difference between the exponents
+    ///
+    /// This operation is fast because it is just a subtraction of two i32s
+    pub fn power_difference<RHS: Into<BigInt>>(&self, rhs: RHS) -> i32 {
+        self.exponent - rhs.into().exponent
+    }
 }
 
 impl From<f64> for BigInt {
-    fn from(input: f64) -> Self {
+    fn from(input: f64) -> BigInt {
         Self::from_float(input)
     }
 }
 
 impl From<f32> for BigInt {
-    fn from(input: f32) -> Self {
+    fn from(input: f32) -> BigInt {
         Self::from_float(f64::from(input))
+    }
+}
+
+impl From<(f64, i32)> for BigInt {
+    fn from(input: (f64, i32)) -> BigInt {
+        Self::from_parts(input.0, input.1)
     }
 }
 
@@ -257,48 +408,37 @@ impl std::convert::TryFrom<&str> for BigInt {
     type Error = ParseError;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
-        if let Ok(x) = input.parse::<f64>() {
-            return Ok(Self::from_float(x));
-        };
+        BigInt::parse(input)
+    }
+}
 
-        let parts: Vec<_> = input.split("*10^").collect();
-        if parts.len() != 2 {
-            return Err(ParseError::InvalidFormat);
-        }
+impl std::str::FromStr for BigInt {
+    type Err = ParseError;
 
-        let first = match parts[0].parse::<f64>() {
-            Ok(x) => x,
-            Err(_) => return Err(ParseError::InvalidPart),
-        };
-
-        let second = match parts[1].parse::<i32>() {
-            Ok(x) => x,
-            Err(_) => return Err(ParseError::NotExponent),
-        };
-
-        let mut big_int = Self::from_float(first);
-
-        big_int.exponent += second;
-
-        Ok(big_int)
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        BigInt::parse(s)
     }
 }
 
 impl From<Special> for BigInt {
-    fn from(input: Special) -> Self {
+    fn from(input: Special) -> BigInt {
         BigInt {
-            coefficient: 0,
-            sign: Sign::Pos,
-            exponent: 0,
             special: Some(input),
+            ..Default::default()
         }
+    }
+}
+
+impl Default for BigInt {
+    fn default() -> BigInt {
+        Self::one()
     }
 }
 
 impl Neg for BigInt {
     type Output = BigInt;
 
-    fn neg(self) -> Self {
+    fn neg(self) -> BigInt {
         let mut me = self;
         me.sign = -me.sign;
 
@@ -306,8 +446,26 @@ impl Neg for BigInt {
     }
 }
 
+impl Mul for BigInt {
+    type Output = Self;
+
+    #[allow(clippy::suspicious_arithmetic_impl)]
+    fn mul(self, rhs: Self) -> Self::Output {
+        let a = Self::convert_back(self.coefficient);
+        let b = Self::convert_back(rhs.coefficient);
+
+        Self::from_parts(a * b, self.exponent + rhs.exponent)
+    }
+}
+
 impl std::fmt::Display for BigInt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let style = if let Some(style) = self.exponent_style.as_ref() {
+            style
+        } else {
+            DEFAULT_EXPONENT_STYLE
+        };
+
         match self {
             BigInt {
                 special: Some(Special::Zero),
@@ -331,34 +489,40 @@ impl std::fmt::Display for BigInt {
                 special: None,
                 sign: Sign::Pos,
                 exponent: 0,
+                coefficient,
                 ..
-            } => write!(f, "{}", BigInt::convert_back(self.coefficient)),
+            } => write!(f, "{}", BigInt::convert_back(*coefficient)),
             BigInt {
                 special: None,
                 sign: Sign::Neg,
                 exponent: 0,
+                coefficient,
                 ..
-            } => write!(f, "-{}", BigInt::convert_back(self.coefficient)),
+            } => write!(f, "-{}", BigInt::convert_back(*coefficient)),
             BigInt {
                 special: None,
                 sign: Sign::Pos,
                 exponent,
+                coefficient,
                 ..
             } => write!(
                 f,
-                "{}*10^{}",
-                BigInt::convert_back(self.coefficient),
+                "{}{}{}",
+                BigInt::convert_back(*coefficient),
+                style,
                 exponent
             ),
             BigInt {
                 special: None,
                 sign: Sign::Neg,
                 exponent,
+                coefficient,
                 ..
             } => write!(
                 f,
-                "-{}*10^{}",
-                BigInt::convert_back(self.coefficient),
+                "-{}{}{}",
+                BigInt::convert_back(*coefficient),
+                style,
                 exponent
             ),
         }
@@ -375,7 +539,7 @@ impl std::fmt::Display for BigInt {
 
 #[cfg(test)]
 mod print {
-    use super::BigInt;
+    use crate::BigInt;
 
     #[test]
     fn zero() {
@@ -393,6 +557,7 @@ mod print {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn negative_three_point_fourteen_fifteen() {
         assert_eq!(BigInt::from(-3.1415).to_string(), "-3.1415")
     }
@@ -461,10 +626,11 @@ mod print {
 
 #[cfg(test)]
 mod parse {
-    use super::{BigInt, ParseError, Sign};
+    use crate::{BigInt, ParseError, Sign};
     use std::convert::TryFrom;
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn float() {
         assert_eq!(
             BigInt::try_from("3.1415".to_string()).unwrap(),
@@ -542,15 +708,40 @@ mod parse {
                 coefficient: 0,
                 sign: Sign::Pos,
                 exponent: 123456,
-                special: None
+                ..Default::default()
             })
         )
+    }
+
+    #[test]
+    #[allow(clippy::useless_conversion)]
+    fn from_itself() {
+        let expected = BigInt::try_from("123").unwrap();
+        let original = BigInt::try_from("123").unwrap();
+        let result = BigInt::from(original);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn use_parse_function() {
+        let x = "123.123*10^2".parse::<BigInt>().unwrap();
+
+        assert_eq!("1.23123*10^4", x.to_string())
+    }
+
+    #[test]
+    fn from_parts() {
+        let big_int = BigInt::from((2.1, 5));
+        let expected = BigInt::from_float(210000.0);
+
+        assert_eq!(big_int, expected);
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod float {
-    use super::BigInt;
+    use crate::BigInt;
     use std::convert::TryFrom;
 
     #[test]
@@ -587,11 +778,17 @@ mod float {
 
         assert_eq!(f32::INFINITY, f32::from(input))
     }
+
+    #[test]
+    fn super_small() {
+        let input = BigInt::try_from("1*10^-35000").unwrap();
+        assert_eq!(0.0, f64::from(input))
+    }
 }
 
 #[cfg(test)]
 mod ops {
-    use super::BigInt;
+    use crate::BigInt;
 
     #[test]
     fn neg() {
@@ -599,5 +796,45 @@ mod ops {
         let input = BigInt::from_float(-1.0);
 
         assert_eq!(expected, -input)
+    }
+
+    #[test]
+    fn mul_pos() {
+        let expected = BigInt::from_parts(2.5, 50);
+
+        let a = BigInt::from_parts(2.0, 30);
+        let b = BigInt::from_parts(1.25, 20);
+
+        assert_eq!(expected, a * b)
+    }
+
+    #[test]
+    fn mul_mixed() {
+        let expected = BigInt::from_parts(1.65, -9);
+
+        let a = BigInt::from_parts(5.5, -30);
+        let b = BigInt::from_parts(3.0, 20);
+
+        assert_eq!(expected, a * b)
+    }
+
+    #[test]
+    fn multiply() {
+        let expected = BigInt::from_parts(1.1055, -14);
+
+        let a = BigInt::from_parts(5.5, -15);
+        let b = 2.01;
+
+        assert_eq!(expected, a.multiply(b))
+    }
+
+    #[test]
+    fn power_difference() {
+        let expected = -1;
+
+        let a = BigInt::from_parts(7.84, -15);
+        let b = BigInt::from_parts(1.96, -14);
+
+        assert_eq!(expected, a.power_difference(b))
     }
 }
