@@ -1,5 +1,12 @@
+#![warn(
+    clippy::all,
+    clippy::nursery,
+    // clippy::pedantic,
+    // clippy::cargo,
+    // clippy::restriction
+)]
+#![allow(clippy::use_self, clippy::must_use_candidate)]
 #![deny(clippy::all)]
-#![deny(clippy::pedantic)]
 
 use std::convert::TryFrom;
 use std::num::FpCategory;
@@ -70,7 +77,7 @@ const U64_STEP: f64 = 4.878_909_776_184_77e-19;
 const DEFAULT_EXPONENT_STYLE: &str = "*10^";
 
 impl BigInt {
-    /// Creates a BigInt with the value 0
+    /// Creates a `BigInt` with the value 0
     ///
     /// ```rust
     /// use big_int::BigInt;
@@ -80,18 +87,18 @@ impl BigInt {
     pub fn zero() -> BigInt {
         BigInt {
             special: Some(Special::Zero),
-            ..Default::default()
+            ..BigInt::default()
         }
     }
 
-    /// Creates a BigInt with the value 1
+    /// Creates a `BigInt` with the value 1
     ///
     /// ```rust
     /// use big_int::BigInt;
     ///
     /// assert_eq!("1", BigInt::one().to_string())
     /// ```
-    pub fn one() -> BigInt {
+    pub const fn one() -> BigInt {
         BigInt {
             coefficient: 0,
             sign: Sign::Pos,
@@ -101,7 +108,7 @@ impl BigInt {
         }
     }
 
-    /// Creates a BigInt containing `f64::INFINITY`
+    /// Creates a `BigInt` containing `f64::INFINITY`
     ///
     /// ```rust
     /// use big_int::BigInt;
@@ -111,11 +118,11 @@ impl BigInt {
     pub fn infinity() -> BigInt {
         BigInt {
             special: Some(Special::Inf),
-            ..Default::default()
+            ..BigInt::default()
         }
     }
 
-    /// Creates a BigInt containing `f64::NAN`
+    /// Creates a `BigInt` containing `f64::NAN`
     ///
     /// ```rust
     /// use big_int::BigInt;
@@ -125,7 +132,7 @@ impl BigInt {
     pub fn nan() -> BigInt {
         BigInt {
             special: Some(Special::Nan),
-            ..Default::default()
+            ..BigInt::default()
         }
     }
 
@@ -134,10 +141,10 @@ impl BigInt {
     }
 
     fn convert_back(input: u64) -> f64 {
-        (input as f64 * U64_STEP) + 1.0
+        (input as f64).mul_add(U64_STEP, 1.0)
     }
 
-    /// Creates BigInt from a float and exponent part
+    /// Creates `BigInt` from a float and exponent part
     ///
     /// ```rust
     /// use big_int::BigInt;
@@ -151,7 +158,7 @@ impl BigInt {
         big_int
     }
 
-    /// Creates BigInt from a float
+    /// Creates `BigInt` from a float
     ///
     /// ```rust
     /// use big_int::BigInt;
@@ -176,7 +183,7 @@ impl BigInt {
             let coefficient = Self::convert(input);
             return BigInt {
                 coefficient,
-                ..Default::default()
+                ..BigInt::default()
             };
         }
 
@@ -186,7 +193,7 @@ impl BigInt {
             return BigInt {
                 coefficient,
                 sign: Sign::Neg,
-                ..Default::default()
+                ..BigInt::default()
             };
         }
 
@@ -204,7 +211,7 @@ impl BigInt {
                 coefficient,
                 sign,
                 exponent,
-                ..Default::default()
+                ..BigInt::default()
             };
         }
 
@@ -470,7 +477,7 @@ impl From<Special> for BigInt {
     fn from(input: Special) -> BigInt {
         BigInt {
             special: Some(input),
-            ..Default::default()
+            ..BigInt::default()
         }
     }
 }
@@ -754,7 +761,7 @@ mod parse {
                 coefficient: 0,
                 sign: Sign::Pos,
                 exponent: 123_456,
-                ..Default::default()
+                ..BigInt::default()
             })
         )
     }
