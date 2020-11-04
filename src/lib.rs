@@ -1,9 +1,13 @@
 #![deny(clippy::all)]
-// #![deny(clippy::pedantic)]
+#![deny(clippy::pedantic)]
 
 use std::convert::TryFrom;
 use std::num::FpCategory;
 use std::ops::{Mul, Neg};
+
+mod error;
+mod r#macro;
+pub use error::*;
 
 #[derive(Debug, PartialEq)]
 /// container for special values used in `BigInt`
@@ -61,29 +65,8 @@ pub struct BigInt {
     exponent_style: Option<String>,
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ParseError {
-    InvalidPart,
-    NotExponent,
-    InvalidFormat,
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ParseError::*;
-
-        match self {
-            InvalidPart => write!(f, "first part not a float"),
-            NotExponent => write!(f, "exponent part not a integer"),
-            InvalidFormat => write!(f, "invalid format"),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
-
 const U64_STEP: f64 = 4.878_909_776_184_77e-19;
-const U64_MAX: u64 = std::u64::MAX;
+// const U64_MAX: u64 = std::u64::MAX;
 const DEFAULT_EXPONENT_STYLE: &str = "*10^";
 
 impl BigInt {
@@ -235,6 +218,25 @@ impl BigInt {
         unreachable!()
     }
 
+    /// Creates `BigInt` from an integer
+    ///
+    /// ```rust
+    /// use big_int::BigInt;
+    ///
+    /// let expected = BigInt::parse("8.3*10^4").expect("invalid format");
+    /// assert_eq!(expected, BigInt::from_integer(83000));
+    /// ```
+    pub fn from_integer(input: i128) -> Self {
+        if input == 0 {
+            return BigInt::zero();
+        };
+
+        let exponent = (input.abs() as f64).log10().floor() as i32;
+        let coefficient = (input as f64) / 10_f64.powi(exponent);
+
+        BigInt::from_parts(coefficient, exponent)
+    }
+
     /// Casts `BigInt` to float.
     ///
     /// Large numbers that don't fit into f64 will turn into `f64::INFINITY`.
@@ -325,29 +327,31 @@ impl BigInt {
     /// let big_int = BigInt::parse("15.51").expect("invalid format");
     /// assert_eq!(15.51, big_int.to_float());
     /// ```
-    pub fn parse(input: &str) -> Result<BigInt, ParseError> {
+    pub fn parse(input: &str) -> Result<BigInt> {
+        if let Ok(x) = input.parse::<i128>() {
+            return Ok(Self::from_integer(x));
+        };
+
         if let Ok(x) = input.parse::<f64>() {
             return Ok(Self::from_float(x));
         };
 
         let parts: Vec<_> = input.split(DEFAULT_EXPONENT_STYLE).collect();
         if parts.len() != 2 {
-            return Err(ParseError::InvalidFormat);
+            return Err(ParseError::InvalidFormat.into());
         }
 
         let first = match parts[0].parse::<f64>() {
             Ok(x) => x,
-            Err(_) => return Err(ParseError::InvalidPart),
+            Err(_) => return Err(ParseError::InvalidPart.into()),
         };
 
         let second = match parts[1].parse::<i32>() {
             Ok(x) => x,
-            Err(_) => return Err(ParseError::NotExponent),
+            Err(_) => return Err(ParseError::NotExponent.into()),
         };
 
-        let big_int = Self::from_parts(first, second);
-
-        Ok(big_int)
+        Ok(Self::from_parts(first, second))
     }
 
     // operations
@@ -358,13 +362,55 @@ impl BigInt {
         self * other
     }
 
+    pub fn pow(self, power: i32) -> BigInt {
+        let (change_sign, exponent) = if power == 0 {
+            (10, self.exponent * power)
+        } else if power % 2 == 0 {
+            (2, self.exponent * power)
+        } else {
+            (1, self.exponent * power)
+        };
+
+        let mut big_int = BigInt::from_float(Self::convert_back(self.coefficient).powi(power));
+
+        match change_sign {
+            10 => big_int = BigInt::one(),
+            2 => big_int.sign = Sign::Pos,
+            1 => big_int.sign = self.sign,
+            _ => unreachable!(),
+        };
+
+        big_int.exponent += exponent;
+        big_int
+    }
+
     /// Calculates the difference between the exponents
     ///
     /// This operation is fast because it is just a subtraction of two i32s
     pub fn power_difference<RHS: Into<BigInt>>(&self, rhs: RHS) -> i32 {
         self.exponent - rhs.into().exponent
     }
+
+    pub fn factorial(n: u64) -> BigInt {
+        if (n == 0) || (n == 1) {
+            BigInt::one()
+        } else if n == 2 {
+            BigInt::from(2)
+        } else {
+            (2..n).fold(BigInt::from(n), |acc, x| acc * BigInt::from(x))
+        }
+    }
 }
+
+impl_int!(i128);
+impl_int!(i64);
+impl_int!(i32);
+impl_int!(i16);
+impl_int!(i8);
+impl_int!(u64);
+impl_int!(u32);
+impl_int!(u16);
+impl_int!(u8);
 
 impl From<f64> for BigInt {
     fn from(input: f64) -> BigInt {
@@ -397,25 +443,25 @@ impl From<BigInt> for f32 {
 }
 
 impl std::convert::TryFrom<String> for BigInt {
-    type Error = ParseError;
+    type Error = Error;
 
-    fn try_from(input: String) -> Result<Self, Self::Error> {
+    fn try_from(input: String) -> Result<Self> {
         Self::try_from(input.as_str())
     }
 }
 
 impl std::convert::TryFrom<&str> for BigInt {
-    type Error = ParseError;
+    type Error = Error;
 
-    fn try_from(input: &str) -> Result<Self, Self::Error> {
+    fn try_from(input: &str) -> Result<Self> {
         BigInt::parse(input)
     }
 }
 
 impl std::str::FromStr for BigInt {
-    type Err = ParseError;
+    type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self> {
         BigInt::parse(s)
     }
 }
@@ -658,7 +704,7 @@ mod parse {
     fn error_first_part() {
         assert_eq!(
             BigInt::try_from("test*10^8".to_string()),
-            Err(ParseError::InvalidPart)
+            Err(ParseError::InvalidPart.into())
         )
     }
 
@@ -666,7 +712,7 @@ mod parse {
     fn error_exponent() {
         assert_eq!(
             BigInt::try_from("1.23*10^1.123".to_string()),
-            Err(ParseError::NotExponent)
+            Err(ParseError::NotExponent.into())
         )
     }
 
@@ -674,7 +720,7 @@ mod parse {
     fn error_format() {
         assert_eq!(
             BigInt::try_from("testing".to_string()),
-            Err(ParseError::InvalidFormat)
+            Err(ParseError::InvalidFormat.into())
         )
     }
 
@@ -707,7 +753,7 @@ mod parse {
             Ok(BigInt {
                 coefficient: 0,
                 sign: Sign::Pos,
-                exponent: 123456,
+                exponent: 123_456,
                 ..Default::default()
             })
         )
@@ -732,7 +778,7 @@ mod parse {
     #[test]
     fn from_parts() {
         let big_int = BigInt::from((2.1, 5));
-        let expected = BigInt::from_float(210000.0);
+        let expected = BigInt::from(210_000);
 
         assert_eq!(big_int, expected);
     }
@@ -787,6 +833,36 @@ mod float {
 }
 
 #[cfg(test)]
+mod integer {
+    use crate::BigInt;
+
+    #[test]
+    fn two_hundered_thirty() {
+        assert_eq!(BigInt::from_parts(2.3, 2), BigInt::from_integer(230))
+    }
+
+    #[test]
+    fn negative_four_thousand_fourty() {
+        assert_eq!(BigInt::from_parts(-4.04, 3), BigInt::from_integer(-4040))
+    }
+
+    #[test]
+    fn zero() {
+        assert_eq!(BigInt::zero(), BigInt::from_integer(0))
+    }
+
+    #[test]
+    fn negative_zero() {
+        assert_eq!(BigInt::zero(), BigInt::from_integer(-0))
+    }
+
+    #[test]
+    fn from() {
+        assert_eq!(BigInt::from_parts(1.23542, 5), BigInt::from(123_542))
+    }
+}
+
+#[cfg(test)]
 mod ops {
     use crate::BigInt;
 
@@ -836,5 +912,82 @@ mod ops {
         let b = BigInt::from_parts(1.96, -14);
 
         assert_eq!(expected, a.power_difference(b))
+    }
+
+    #[test]
+    fn square() {
+        let result = BigInt::from(3600);
+        let expected = BigInt::from_parts(1.296, 7);
+
+        assert_eq!(expected, result.pow(2))
+    }
+
+    #[test]
+    fn cube() {
+        let result = BigInt::from(-36);
+        let expected = BigInt::from_parts(-4.6656, 4);
+
+        assert_eq!(expected, result.pow(3))
+    }
+}
+
+#[cfg(test)]
+mod factorial {
+    use crate::BigInt;
+
+    fn compare(n: u64, actual: f64) -> bool {
+        let calculated = BigInt::factorial(n);
+
+        let actual_float = actual;
+        let calculated_float = calculated.to_float();
+
+        let max = actual_float.max(calculated_float);
+        let difference = ((actual_float - calculated_float) / max).abs();
+        difference < 10e-15
+    }
+
+    #[test]
+    fn small_error_30() {
+        assert!(compare(30, 265_252_859_812_191_058_636_308_480_000_000_f64))
+    }
+
+    #[test]
+    fn small_error_35() {
+        assert!(compare(
+            35,
+            10_333_147_966_386_144_929_666_651_337_523_200_000_000_f64
+        ))
+    }
+
+    #[test]
+    fn small_error_40() {
+        assert!(compare(
+            40,
+            815_915_283_247_897_734_345_611_269_596_115_894_272_000_000_000_f64
+        ))
+    }
+
+    #[test]
+    fn small_error_45() {
+        assert!(compare(
+            45,
+            119_622_220_865_480_194_561_963_161_495_657_715_064_383_733_760_000_000_000_f64
+        ))
+    }
+
+    #[test]
+    fn small_error_60() {
+        assert!(compare(
+            60,
+            8_320_987_112_741_390_144_276_341_183_223_364_380_754_172_606_361_245_952_449_277_696_409_600_000_000_000_000_f64
+        ))
+    }
+
+    #[test]
+    fn small_error_100() {
+        assert!(compare(
+            100,
+            93_326_215_443_944_152_681_699_238_856_266_700_490_715_968_264_381_621_468_592_963_895_217_599_993_229_915_608_941_463_976_156_518_286_253_697_920_827_223_758_251_185_210_916_864_000_000_000_000_000_000_000_000_f64
+        ))
     }
 }
