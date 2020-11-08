@@ -6,6 +6,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     IntegerError(IntegerError),
     ParseError(ParseError),
+    OperatorError(OperatorError),
 }
 
 impl std::fmt::Display for Error {
@@ -15,6 +16,7 @@ impl std::fmt::Display for Error {
         match self {
             ParseError(e) => write!(f, "{}", e),
             IntegerError(e) => write!(f, "{}", e),
+            OperatorError(e) => write!(f, "{}", e),
         }
     }
 }
@@ -22,6 +24,18 @@ impl std::fmt::Display for Error {
 impl From<ParseError> for Error {
     fn from(err: ParseError) -> Error {
         Error::ParseError(err)
+    }
+}
+
+impl From<IntegerError> for Error {
+    fn from(err: IntegerError) -> Error {
+        Error::IntegerError(err)
+    }
+}
+
+impl From<OperatorError> for Error {
+    fn from(err: OperatorError) -> Error {
+        Error::OperatorError(err)
     }
 }
 
@@ -62,6 +76,22 @@ impl std::fmt::Display for IntegerError {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum OperatorError {
+    ExponentTooLarge,
+}
+
+impl std::fmt::Display for OperatorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use OperatorError::*;
+
+        match self {
+            ExponentTooLarge => write!(f, "Self is too large to be used as an exponent"),
+        }
+    }
+}
+
 impl std::error::Error for IntegerError {}
 impl std::error::Error for ParseError {}
+impl std::error::Error for OperatorError {}
 impl std::error::Error for Error {}
