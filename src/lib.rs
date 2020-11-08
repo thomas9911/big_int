@@ -236,7 +236,7 @@ impl BigInt {
             return BigInt {
                 coefficient,
                 sign,
-                exponent: exponent as i128,
+                exponent: i128::from(exponent),
                 ..BigInt::default()
             };
         }
@@ -245,7 +245,7 @@ impl BigInt {
             let exponent = input.abs().log10().floor() as i32;
             let remainder = input / (10_f64.powi(exponent));
 
-            return Self::from_parts(remainder, exponent as i128);
+            return Self::from_parts(remainder, i128::from(exponent));
         }
 
         unreachable!()
@@ -267,7 +267,7 @@ impl BigInt {
         let exponent = (input.abs() as f64).log10().floor() as i32;
         let coefficient = (input as f64) / 10_f64.powi(exponent);
 
-        BigInt::from_parts(coefficient, exponent as i128)
+        BigInt::from_parts(coefficient, i128::from(exponent))
     }
 
     /// Casts `BigInt` to float.
@@ -306,9 +306,9 @@ impl BigInt {
         };
 
         let nmbr = Self::convert_back(self.coefficient);
-        let power = if self.exponent > (i32::MAX as i128) {
+        let power = if self.exponent > (i128::from(i32::MAX)) {
             f64::INFINITY
-        } else if (i32::MIN as i128) > self.exponent {
+        } else if i128::from(i32::MIN) > self.exponent {
             0.0
         } else {
             10_f64.powi(self.exponent as i32)
@@ -499,7 +499,7 @@ impl BigInt {
     }
 
     fn fits_in_i32(&self) -> Result<i32> {
-        if self.to_float() > (i32::MAX as f64) {
+        if self.to_float() > f64::from(i32::MAX) {
             Err(OperatorError::ExponentTooLarge.into())
         } else {
             Ok(self.to_float() as i32)
@@ -636,6 +636,7 @@ impl Add for BigInt {
 
     #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, other: Self) -> BigInt {
+        use std::cmp::Ordering::{Equal, Greater, Less};
         let power_diff = match self.exponent.checked_sub(other.exponent) {
             Some(x) => x,
             None => {
@@ -647,7 +648,6 @@ impl Add for BigInt {
             }
         };
 
-        use std::cmp::Ordering::*;
         match power_diff.cmp(&0) {
             Equal => cheese(self.coefficient, other.coefficient, self.exponent),
             Greater => {
@@ -667,35 +667,6 @@ impl Add for BigInt {
         }
     }
 }
-
-// fn blub(a: u64, b: u64) -> std::result::Result<u64, u8> {
-//     println!("{} {}", a, b);
-//     if let Some(x) = a.checked_add(ONE_COEFFICIENT) {
-//         if let Some(y) = x.checked_add(b) {
-//             return Ok(y);
-//         } else {
-//             return Err(1);
-//         };
-//     };
-
-//     if let Some(x) = b.checked_add(ONE_COEFFICIENT) {
-//         if let Some(y) = x.checked_add(a) {
-//             return Ok(y);
-//         } else {
-//             return Err(1);
-//         };
-//     };
-
-//     if let Some(x) = a.checked_add(b) {
-//         if let Some(y) = x.checked_add(ONE_COEFFICIENT) {
-//             return Ok(y);
-//         } else {
-//             return Err(0);
-//         };
-//     };
-
-//     panic!("underflow again")
-// }
 
 fn cheese(left: u64, right: u64, exponent: i128) -> BigInt {
     match blub(left, right) {
@@ -739,7 +710,7 @@ const fn blub(a: u64, b: u64) -> (u64, bool) {
 
 #[allow(clippy::missing_const_for_fn)]
 fn blub_diff(a: u64, b: u64, diff: u32) -> (u64, bool) {
-    if let Some(pw) = 10u64.checked_pow(diff) {
+    if let Some(pw) = 10_u64.checked_pow(diff) {
         let (x, y) = blub(a, b / pw);
         (x - ONE_COEFFICIENT + ONE_COEFFICIENT / pw, y)
     } else {
@@ -1239,32 +1210,33 @@ mod add {
 
     #[test]
     fn very_large_plus_normal() {
-        let result = BigInt::from_parts(5.0, 123456) + BigInt::from(6.8);
-        assert_near_equal(BigInt::from_parts(5.0, 123456), result);
+        let result = BigInt::from_parts(5.0, 123_456) + BigInt::from(6.8);
+        assert_near_equal(BigInt::from_parts(5.0, 123_456), result);
     }
 
     #[test]
     fn very_small_plus_normal() {
-        let result = BigInt::from_parts(5.0, -123456) + BigInt::from(6.8);
+        let result = BigInt::from_parts(5.0, -123_456) + BigInt::from(6.8);
         assert_near_equal(BigInt::from(6.8), result);
     }
 
     #[test]
     fn very_small_plus_very_large() {
-        let result = BigInt::from_parts(5.0, -123456) + BigInt::from_parts(5.0, 123456789111213);
-        assert_near_equal(BigInt::from_parts(5.0, 123456789111213), result);
+        let result =
+            BigInt::from_parts(5.0, -123_456) + BigInt::from_parts(5.0, 123_456_789_111_213);
+        assert_near_equal(BigInt::from_parts(5.0, 123_456_789_111_213), result);
     }
 
     #[test]
     fn large_plus_small() {
         let result = BigInt::from_parts(5.0, 3) + BigInt::from_parts(5.0, -3);
-        assert_near_equal(BigInt::from_parts(5.000005, 3), result);
+        assert_near_equal(BigInt::from_parts(5.000_005, 3), result);
     }
 
     #[test]
     fn small_plus_large() {
         let result = BigInt::from_parts(5.0, -3) + BigInt::from_parts(5.0, 3);
-        assert_near_equal(BigInt::from_parts(5.000005, 3), result);
+        assert_near_equal(BigInt::from_parts(5.000_005, 3), result);
     }
 
     #[test]
@@ -1377,7 +1349,10 @@ mod hyper_exponential {
     #[test]
     fn five_two() {
         let result = BigInt::from(2).hyper_exponential(5);
-        assert_eq!(Ok(BigInt::from_parts(1.0017649652034222, 19728)), result);
+        assert_eq!(
+            Ok(BigInt::from_parts(1.001_764_965_203_422_2, 19728)),
+            result
+        );
     }
 
     #[test]
@@ -1395,7 +1370,7 @@ mod hyper_exponential {
     #[test]
     fn three_three() {
         let result = BigInt::from(3).hyper_exponential(3);
-        assert_eq!(Ok(BigInt::from_parts(7.625597484987001, 12)), result);
+        assert_eq!(Ok(BigInt::from_parts(7.625_597_484_987_001, 12)), result);
     }
 
     #[test]
